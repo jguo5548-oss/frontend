@@ -1,79 +1,118 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import './App.css';
 
-function App() {
-  // 用來儲存聊天記錄的清單
-  const [messages, setMessages] = useState([
-    { role: 'character', content: '歡迎回到我們的家！現在我已經升級成 React 版本啦~' }
-  ]);
-  // 用來儲存你在輸入框裡打的字
-  const [inputValue, setInputValue] = useState('');
-  // 用來記錄 AI 是否正在思考中
-  const [isLoading, setIsLoading] = useState(false);
+const BACKEND_URL = 'https://backend-5vas.onrender.com';
 
-  // 🚨 綁定你專屬的 Render 後端網址
-  const BACKEND_URL = 'https://backend-5vas.onrender.com';
+const personas = {
+  'sho酱': { label: 'sho酱（日语）', greeting: 'こんにちは！日本語の練習、一緒に頑張ろう！' },
+  'en硕': { label: 'en硕（韩语）', greeting: '안녕하세요！한국어 같이 공부해요！' },
+};
+
+function App() {
+  const [currentPersona, setCurrentPersona] = useState('sho酱');
+  const [chats, setChats] = useState({
+    'sho酱': [{ role: 'character', content: 'こんにちは！日本語の練習、一緒に頑張ろう！' }],
+    'en硕': [{ role: 'character', content: '안녕하세요！한국어 같이 공부해요！' }],
+  });
+  const [inputValue, setInputValue] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const audioRef = useRef(null);
+
+  const messages = chats[currentPersona];
+
+  const switchPersona = (name) => {
+    setCurrentPersona(name);
+    setInputValue('');
+  };
+
+  const playTTS = async (text, persona) => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/tts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, persona }),
+      });
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      if (audioRef.current) {
+        audioRef.current.src = url;
+        audioRef.current.play();
+      }
+    } catch (e) {
+      console.log('语音播放失败', e);
+    }
+  };
 
   const handleSend = async () => {
     if (!inputValue.trim() || isLoading) return;
 
     const userMessage = inputValue;
-    setInputValue(''); // 清空輸入框
-    
-    // 1. 把你說的話，立刻加到聊天畫面上
-    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
+    setInputValue('');
+
+    setChats((prev) => ({
+      ...prev,
+      [currentPersona]: [...prev[currentPersona], { role: 'user', content: userMessage }],
+    }));
     setIsLoading(true);
 
     try {
-      // 2. 把話傳送給 Render 後端大管家
       const response = await fetch(`${BACKEND_URL}/api/chat`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message: userMessage }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMessage, persona: currentPersona }),
       });
 
       const data = await response.json();
 
-      // 3. 把 Claude 的回覆展示在畫面上
       if (data.reply) {
-        setMessages((prev) => [...prev, { role: 'character', content: data.reply }]);
+        setChats((prev) => ({
+          ...prev,
+          [currentPersona]: [...prev[currentPersona], { role: 'character', content: data.reply }],
+        }));
+        // 收到回复后自动播放语音
+        await playTTS(data.reply, currentPersona);
       } else {
-        setMessages((prev) => [...prev, { role: 'character', content: '大管家開小差了，沒能拿到 Claude 的回覆。' }]);
+        setChats((prev) => ({
+          ...prev,
+          [currentPersona]: [...prev[currentPersona], { role: 'character', content: '好像出错了，再说一次？' }],
+        }));
       }
     } catch (error) {
-      setMessages((prev) => [...prev, { role: 'character', content: '網路連線失敗，大管家好像斷線了。' }]);
+      setChats((prev) => ({
+        ...prev,
+        [currentPersona]: [...prev[currentPersona], { role: 'character', content: '网络断了，稍后再试。' }],
+      }));
     } finally {
-      setIsLoading(false); // 結束思考狀態
+      setIsLoading(false);
     }
   };
 
   return (
     <div className="app-container">
-      {/* 左側：對話切換清單 */}
+      <audio ref={audioRef} />
+
+      {/* 左侧：人物切换 */}
       <div className="sidebar">
-        <div className="sidebar-header">我們的家</div>
+        <div className="sidebar-header">我们的家</div>
         <div className="chat-list">
-          <div className="chat-item active">當前對話 (萌萌DOKI)</div>
-          <div className="chat-item">日常記錄</div>
-          <div className="chat-item">靈感備忘錄</div>
+          {Object.entries(personas).map(([name, config]) => (
+            <div
+              key={name}
+              className={`chat-item ${currentPersona === name ? 'active' : ''}`}
+              onClick={() => switchPersona(name)}
+            >
+              {config.label}
+            </div>
+          ))}
         </div>
       </div>
 
-      {/* 右側：主體區域 */}
+      {/* 右侧：主体 */}
       <div className="main-content">
-        {/* 頂部區域 */}
         <div className="top-bar">
-          <div className="model-selector">
-            <select>
-              <option value="model-a">Claude 3.5 智慧模型</option>
-            </select>
-          </div>
-          <div>設置 | 個人中心</div>
+          <div style={{ fontWeight: 'bold', fontSize: '16px' }}>{currentPersona}</div>
         </div>
 
-        {/* 聊天主介面 */}
         <div className="chat-container">
           {messages.map((msg, index) => (
             <div key={index} className={`chat-message ${msg.role}`}>
@@ -82,23 +121,22 @@ function App() {
           ))}
           {isLoading && (
             <div className="chat-message character">
-              <div className="bubble">正在認真思考中...</div>
+              <div className="bubble">认真思考中...</div>
             </div>
           )}
         </div>
 
-        {/* 底部輸入框與按鈕 */}
         <div className="input-area">
           <input
             type="text"
             className="input-box"
-            placeholder="在這裡輸入你想說的話..."
+            placeholder={`和${currentPersona}说点什么...`}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSend()}
             disabled={isLoading}
           />
-          <button 
+          <button
             onClick={handleSend}
             style={{
               marginLeft: '10px',
@@ -111,7 +149,7 @@ function App() {
             }}
             disabled={isLoading}
           >
-            發送
+            发送
           </button>
         </div>
       </div>
